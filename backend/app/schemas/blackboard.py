@@ -46,6 +46,8 @@ class BlackboardState(BaseModel):
     # Timestamps
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
 
     # Events
     events: List[Dict[str, Any]] = Field(default_factory=list)

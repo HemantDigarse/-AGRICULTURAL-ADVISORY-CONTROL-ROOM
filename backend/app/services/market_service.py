@@ -5,6 +5,8 @@ import random
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
+import httpx
+
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -110,7 +112,7 @@ async def get_market_price(crop: str, state: str) -> Dict[str, Any]:
     """
     crop_lower = crop.lower().strip()
 
-    if settings.DEMO_MODE or True:  # Always demo for now (no live mandi API)
+    if settings.DEMO_MODE:
         logger.info("[DEMO] Generating market data for %s in %s", crop, state)
 
         price_info = DEMO_MANDI_PRICES.get(crop_lower)
@@ -182,4 +184,89 @@ async def get_market_price(crop: str, state: str) -> Dict[str, Any]:
             "is_demo": True,
             "source": "demo",
         }
+
+    if not settings.DATA_GOV_API_KEY:
+        raise RuntimeError(
+            "Live mandi prices require DATA_GOV_API_KEY. Create a free data.gov.in "
+            "API key and add it to backend/.env."
+        )
+
+    commodity = {"rice": "Paddy(Dhan)(Common)"}.get(crop_lower, crop.title())
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(
+            "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070",
+            params={
+                "api-key": settings.DATA_GOV_API_KEY,
+                "format": "json",
+                "limit": 100,
+                "filters[State]": state,
+                "filters[Commodity]": commodity,
+            },
+        )
+        response.raise_for_status()
+        records = response.json().get("records", [])
+
+    if not records:
+        raise RuntimeError(
+            f"No live mandi price records found for {crop} in {state}. "
+            "Try a crop name used by AGMARKNET."
+        )
+
+    prices = []
+    dated_prices: Dict[str, List[float]] = {}
+    for record in records:
+        try:
+            modal_price = float(record["modal_price"])
+            min_price = float(record["min_price"])
+            max_price = float(record["max_price"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        prices.append(
+            {
+                "mandi_name": record.get("market", "Unknown Mandi"),
+                "min_price": min_price,
+                "max_price": max_price,
+                "modal_price": modal_price,
+                "unit": "INR/quintal",
+                "arrival_date": record.get("arrival_date"),
+            }
+        )
+        arrival_date = record.get("arrival_date")
+        if arrival_date:
+            dated_prices.setdefault(arrival_date, []).append(modal_price)
+
+    if not prices:
+        raise RuntimeError("The live mandi response did not contain valid price values.")
+
+    average_price = round(sum(item["modal_price"] for item in prices) / len(prices), 2)
+    daily_averages = [
+        sum(values) / len(values)
+        for _, values in sorted(dated_prices.items())
+        if values
+    ]
+    trend = "stable"
+    if len(daily_averages) >= 2:
+        change = (daily_averages[-1] - daily_averages[0]) / daily_averages[0]
+        if change >= 0.03:
+            trend = "rising"
+        elif change <= -0.03:
+            trend = "falling"
+
+    recommendation = "HOLD" if trend == "falling" else "SELL"
+    return {
+        "crop": crop,
+        "state": state,
+        "prices": prices,
+        "avg_price": average_price,
+        "msp": None,
+        "price_trend": trend,
+        "recommendation": recommendation,
+        "recommendation_reason": (
+            "Recommendation is based on the latest AGMARKNET mandi records and "
+            "the available price trend; verify local quality and transport costs before selling."
+        ),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "is_demo": False,
+        "source": "data.gov.in/AGMARKNET",
+    }
 

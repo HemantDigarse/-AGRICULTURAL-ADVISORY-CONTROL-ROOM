@@ -186,9 +186,13 @@ class CropAdvisoryAgent(BaseAgent):
 
         if settings.DEMO_MODE:
             advisory = self._generate_demo_advisory(crop, growth_stage, weather_data)
-        else:
+        elif settings.OPENAI_API_KEY:
             advisory = await self._generate_llm_advisory(
                 crop, growth_stage, farmer_info, weather_data,
+            )
+        else:
+            advisory = self._generate_live_rule_based_advisory(
+                crop, growth_stage, weather_data
             )
 
         await blackboard.update_section(request_id, "crop_advisory", advisory)
@@ -223,14 +227,34 @@ class CropAdvisoryAgent(BaseAgent):
             "is_demo": True,
         }
 
+    def _generate_live_rule_based_advisory(
+        self, crop: str, stage: str, weather: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate transparent crop guidance using current and historical weather."""
+        advisory = self._generate_demo_advisory(crop, stage, weather)
+        history = weather.get("historical_summary", {})
+        history_context = (
+            f"Live weather analysis: the previous {history.get('days', 0)} days averaged "
+            f"{history.get('average_temperature_c', 'N/A')}°C with "
+            f"{history.get('total_rainfall_mm', 'N/A')} mm of rainfall."
+        )
+        advisory["advisory_text"] = history_context + "\n\n" + advisory["advisory_text"]
+        advisory["data_source"] = "live_weather_rule_based"
+        advisory["is_demo"] = False
+        return advisory
+
     async def _generate_llm_advisory(
         self, crop: str, stage: str, farmer_info: Dict, weather: Dict,
     ) -> Dict[str, Any]:
         current = weather.get("current", {})
+        history = weather.get("historical_summary", {})
         prompt = (
             f"Generate a detailed crop advisory for {crop} at {stage} stage. "
             f"Weather: {current.get('condition', 'N/A')}, Temp: {current.get('temperature_c', 'N/A')}°C, "
             f"Humidity: {current.get('humidity', 'N/A')}%, Rainfall: {current.get('rainfall_mm', 'N/A')}mm. "
+            f"Previous {history.get('days', 0)} day weather: average temperature "
+            f"{history.get('average_temperature_c', 'N/A')}°C and total rainfall "
+            f"{history.get('total_rainfall_mm', 'N/A')}mm. "
             "Provide crop advisory, irrigation, fertilizer, and pest management advice."
         )
         text = await llm_service.generate(prompt)

@@ -26,16 +26,19 @@ async def generate(prompt: str, system_prompt: Optional[str] = None) -> str:
     """
     Generate text using OpenAI or return a demo template response.
 
-    In DEMO_MODE (or if no API key), returns template-based responses.
+    In DEMO_MODE, returns template-based responses. Live mode never falls back
+    to generated demo content.
     """
-    if settings.DEMO_MODE or not settings.OPENAI_API_KEY:
+    if settings.DEMO_MODE:
         logger.info("[DEMO] Generating template response for prompt (first 80 chars): %s", prompt[:80])
         return _demo_generate(prompt)
+    if not settings.OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY is required for AI-generated live advisories.")
 
     try:
         client = _get_openai_client()
         if client is None:
-            return _demo_generate(prompt)
+            raise RuntimeError("Unable to initialize the configured OpenAI client.")
 
         messages = []
         if system_prompt:
@@ -51,8 +54,8 @@ async def generate(prompt: str, system_prompt: Optional[str] = None) -> str:
         return response.choices[0].message.content or ""
 
     except Exception as exc:
-        logger.error("OpenAI API call failed: %s. Using demo fallback.", exc)
-        return _demo_generate(prompt)
+        logger.error("OpenAI API call failed: %s", exc)
+        raise RuntimeError("The AI advisory service is unavailable.") from exc
 
 
 def _demo_generate(prompt: str) -> str:

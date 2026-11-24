@@ -7,12 +7,13 @@ Main entry point for the backend server.
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
 from app.database.init_db import init_db
-from app.api import advisory, weather, market, schemes, alerts, dashboard
+from app.api import advisory, auth, weather, market, schemes, alerts, dashboard
+from app.security import require_current_user
 
 # Configure logging
 logging.basicConfig(
@@ -67,22 +68,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware - allow all origins
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routers
-app.include_router(advisory.router)
-app.include_router(weather.router)
-app.include_router(market.router)
-app.include_router(schemes.router)
-app.include_router(alerts.router)
-app.include_router(dashboard.router)
+app.include_router(auth.router)
+protected_routes = [
+    advisory.router,
+    weather.router,
+    market.router,
+    schemes.router,
+    alerts.router,
+    dashboard.router,
+]
+for router in protected_routes:
+    app.include_router(router, dependencies=[Depends(require_current_user)])
 
 
 @app.get("/api/health")

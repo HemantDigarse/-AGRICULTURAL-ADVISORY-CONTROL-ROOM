@@ -34,6 +34,7 @@ export const getAdvisoryResult = (requestId) => api.get(`/advisory/${requestId}/
 
 // Weather
 export const getWeatherReport = (requestId) => api.get(`/weather/${requestId}`);
+export const getCurrentWeather = (city, state = '') => api.get('/weather/current', { params: { city, state } });
 
 // Market
 export const getMarketData = (requestId) => api.get(`/market/${requestId}`);

@@ -39,6 +39,7 @@ class WeatherAgent(BaseAgent):
         weather_result = {
             "current": current,
             "forecast": weather_data.get("forecast", []),
+            "historical_summary": weather_data.get("historical_summary", {}),
             "risk_level": risk_level,
             "source": weather_data.get("source", "unknown"),
             "city": city,

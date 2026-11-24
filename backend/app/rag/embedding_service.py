@@ -6,7 +6,6 @@ from typing import List, Optional
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
-
 _model = None
 
 

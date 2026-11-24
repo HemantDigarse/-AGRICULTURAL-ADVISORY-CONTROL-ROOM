@@ -122,12 +122,100 @@ def _generate_demo_forecast(base: Dict[str, Any]) -> list:
     return forecast
 
 
+async def _get_openweather_weather(city: str, state: str) -> Dict[str, Any]:
+    """Fetch current weather and a five-day forecast from OpenWeatherMap."""
+    client_options: Dict[str, Any] = {"timeout": 15.0}
+    if settings.HTTP_CA_BUNDLE:
+        client_options["verify"] = settings.HTTP_CA_BUNDLE
+
+    query = ",".join(part for part in (city, state, "IN") if part)
+    async with httpx.AsyncClient(**client_options) as client:
+        current_response = await client.get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            params={
+                "q": query,
+                "appid": settings.WEATHER_API_KEY,
+                "units": "metric",
+            },
+        )
+        current_response.raise_for_status()
+        forecast_response = await client.get(
+            "https://api.openweathermap.org/data/2.5/forecast",
+            params={
+                "q": query,
+                "appid": settings.WEATHER_API_KEY,
+                "units": "metric",
+            },
+        )
+        forecast_response.raise_for_status()
+
+    current_payload = current_response.json()
+    forecast_by_date: Dict[str, list] = {}
+    for item in forecast_response.json().get("list", []):
+        date = item.get("dt_txt", "")[:10]
+        if date:
+            forecast_by_date.setdefault(date, []).append(item)
+
+    forecast = []
+    for date, entries in list(forecast_by_date.items())[:5]:
+        temperatures = [entry.get("main", {}).get("temp") for entry in entries]
+        rainfalls = [
+            entry.get("rain", {}).get("3h", 0.0)
+            for entry in entries
+        ]
+        winds = [entry.get("wind", {}).get("speed", 0.0) * 3.6 for entry in entries]
+        representative = entries[len(entries) // 2]
+        forecast.append(
+            {
+                "date": date,
+                "temperature_c": round(
+                    sum(value for value in temperatures if value is not None)
+                    / max(len([value for value in temperatures if value is not None]), 1),
+                    1,
+                ),
+                "humidity": representative.get("main", {}).get("humidity"),
+                "rainfall_mm": round(sum(rainfalls), 1),
+                "wind_speed_kmh": round(max(winds), 1),
+                "condition": representative.get("weather", [{}])[0].get(
+                    "description", "Unknown"
+                ).title(),
+            }
+        )
+
+    # OpenWeatherMap's standard forecast endpoint has no historical archive.
+    # Use Open-Meteo only for the 14-day history used in advisory calculations.
+    from app.services.live_weather_service import get_live_weather
+
+    historical_weather = await get_live_weather(city, state)
+    return {
+        "current": {
+            "city": current_payload.get("name", city),
+            "state": state,
+            "temperature_c": current_payload.get("main", {}).get("temp"),
+            "humidity": current_payload.get("main", {}).get("humidity"),
+            "rainfall_mm": current_payload.get("rain", {}).get("1h", 0.0),
+            "wind_speed_kmh": round(
+                current_payload.get("wind", {}).get("speed", 0.0) * 3.6, 1
+            ),
+            "condition": current_payload.get("weather", [{}])[0].get(
+                "description", "Unknown"
+            ).title(),
+            "is_demo": False,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "forecast": forecast,
+        "historical_summary": historical_weather.get("historical_summary", {}),
+        "source": "openweathermap + open-meteo historical",
+    }
+
+
 async def get_weather(city: str, state: str) -> Dict[str, Any]:
     """
     Fetch weather data for the given location.
 
     In DEMO_MODE, returns realistic mock data.
-    Otherwise, calls OpenWeatherMap API.
+    Otherwise, prefers OpenWeatherMap when configured, with Open-Meteo used for
+    historical data. Without an OpenWeatherMap key, Open-Meteo provides all data.
     """
     if settings.DEMO_MODE:
         logger.info("[DEMO] Generating weather data for %s, %s", city, state)
@@ -139,57 +227,9 @@ async def get_weather(city: str, state: str) -> Dict[str, Any]:
             "source": "demo",
         }
 
-    # Live mode: call OpenWeatherMap
-    if not settings.WEATHER_API_KEY:
-        logger.warning("No WEATHER_API_KEY set; falling back to demo data")
-        base = _get_demo_weather(city, state)
-        base["is_demo"] = True
-        base["warning"] = "No API key configured - using demo data"
-        return {"current": base, "forecast": _generate_demo_forecast(base), "source": "demo_fallback"}
+    if settings.WEATHER_API_KEY:
+        return await _get_openweather_weather(city, state)
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            query = f"{city},{state},IN"
-            resp = await client.get(
-                "https://api.openweathermap.org/data/2.5/weather",
-                params={"q": query, "appid": settings.WEATHER_API_KEY, "units": "metric"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-            current = {
-                "city": city,
-                "state": state,
-                "temperature_c": data["main"]["temp"],
-                "humidity": data["main"]["humidity"],
-                "rainfall_mm": data.get("rain", {}).get("1h", 0.0),
-                "wind_speed_kmh": round(data["wind"]["speed"] * 3.6, 1),
-                "condition": data["weather"][0]["description"].title(),
-                "is_demo": False,
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-            }
-
-            # Forecast
-            forecast_resp = await client.get(
-                "https://api.openweathermap.org/data/2.5/forecast",
-                params={"q": query, "appid": settings.WEATHER_API_KEY, "units": "metric", "cnt": 5},
-            )
-            forecast_data = []
-            if forecast_resp.status_code == 200:
-                for item in forecast_resp.json().get("list", []):
-                    forecast_data.append({
-                        "date": item["dt_txt"],
-                        "temperature_c": item["main"]["temp"],
-                        "humidity": item["main"]["humidity"],
-                        "rainfall_mm": item.get("rain", {}).get("3h", 0.0),
-                        "condition": item["weather"][0]["description"].title(),
-                    })
-
-            return {"current": current, "forecast": forecast_data, "source": "openweathermap"}
-
-    except Exception as exc:
-        logger.error("Weather API call failed: %s. Falling back to demo.", exc)
-        base = _get_demo_weather(city, state)
-        base["warning"] = f"API error: {exc} - using demo fallback"
-        return {"current": base, "forecast": _generate_demo_forecast(base), "source": "demo_fallback"}
+    from app.services.live_weather_service import get_live_weather
+    return await get_live_weather(city, state)
 

@@ -1,6 +1,7 @@
 """Application settings using Pydantic BaseSettings."""
 
 from typing import List
+import secrets
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -9,14 +10,26 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
     # --- Mode ---
-    DEMO_MODE: bool = Field(default=True, description="Run in demo mode with mock data")
+    DEMO_MODE: bool = Field(default=False, description="Run in demo mode with mock data")
 
     # --- OpenAI ---
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API key")
     OPENAI_MODEL: str = Field(default="gpt-4", description="OpenAI model name")
 
+    AUTH_SECRET_KEY: str = Field(
+        default_factory=lambda: secrets.token_urlsafe(48),
+        description="Secret used to sign authentication tokens",
+    )
+    AUTH_TOKEN_EXPIRE_HOURS: int = Field(default=24, ge=1, description="Login token lifetime")
+
     # --- Weather API ---
     WEATHER_API_KEY: str = Field(default="", description="OpenWeatherMap API key")
+    DATA_GOV_API_KEY: str = Field(
+        default="", description="API key for India's data.gov.in mandi-price API"
+    )
+    HTTP_CA_BUNDLE: str = Field(
+        default="", description="Optional path to a CA bundle required by a corporate proxy"
+    )
 
     # --- Database ---
     DATABASE_URL: str = Field(

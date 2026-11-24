@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict
 
 from app.agents import BaseAgent
+from app.config.settings import settings
 from app.services import llm_service
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,14 @@ class CoordinatorAgent(BaseAgent):
             "You are an expert agricultural advisor in India. Generate a comprehensive, "
             "farmer-friendly advisory in simple language. Include specific actionable steps."
         )
-        advisory_text = await llm_service.generate(prompt, system_prompt)
+        if settings.DEMO_MODE:
+            advisory_text = await llm_service.generate(prompt, system_prompt)
+        elif settings.OPENAI_API_KEY:
+            advisory_text = await llm_service.generate(prompt, system_prompt)
+        else:
+            advisory_text = self._build_data_based_advisory(
+                crop_advisory, weather_data, risk_assessment
+            )
 
         # Build immediate actions
         immediate_actions = self._extract_immediate_actions(
@@ -112,7 +120,7 @@ class CoordinatorAgent(BaseAgent):
             "market_summary": market_summary,
             "scheme_recommendations": scheme_recs,
             "confidence_score": confidence,
-            "is_demo": True,
+            "is_demo": settings.DEMO_MODE,
         }
 
         # Set final advisory on blackboard
@@ -125,6 +133,30 @@ class CoordinatorAgent(BaseAgent):
 
         return final
 
+    def _build_data_based_advisory(
+        self, crop_advisory: Dict[str, Any], weather_data: Dict[str, Any],
+        risk_assessment: Dict[str, Any],
+    ) -> str:
+        """Build a transparent final advisory without inventing AI-generated data."""
+        history = weather_data.get("historical_summary", {})
+        current = weather_data.get("current", {})
+        sections = [
+            "This advisory uses live weather, forecast, and recent historical weather data.",
+            (
+                f"Current conditions: {current.get('condition', 'N/A')}, "
+                f"{current.get('temperature_c', 'N/A')}°C, "
+                f"{current.get('humidity', 'N/A')}% humidity."
+            ),
+            (
+                f"Previous {history.get('days', 0)} days: average temperature "
+                f"{history.get('average_temperature_c', 'N/A')}°C and total rainfall "
+                f"{history.get('total_rainfall_mm', 'N/A')} mm."
+            ),
+            f"Risk level: {risk_assessment.get('overall_risk_level', 'LOW')}.",
+            "Crop guidance:\n" + crop_advisory.get("advisory_text", "No crop guidance available."),
+        ]
+        return "\n\n".join(sections)
+
     def _build_consolidation_prompt(
         self, farmer_info, weather_data, crop_advisory, market_data,
         scheme_data, risk_assessment,
@@ -134,6 +166,7 @@ class CoordinatorAgent(BaseAgent):
         location = farmer_info.get("location", {})
         stage = farmer_info.get("growth_stage", "")
         current_weather = weather_data.get("current", {})
+        historical_weather = weather_data.get("historical_summary", {})
 
         return (
             f"Generate a consolidated farmer-friendly final advisory:\n\n"
@@ -144,6 +177,9 @@ class CoordinatorAgent(BaseAgent):
             f"Temp: {current_weather.get('temperature_c', 'N/A')}°C, "
             f"Humidity: {current_weather.get('humidity', 'N/A')}%, "
             f"Rainfall: {current_weather.get('rainfall_mm', 'N/A')}mm\n\n"
+            f"RECENT HISTORY: Previous {historical_weather.get('days', 0)} days averaged "
+            f"{historical_weather.get('average_temperature_c', 'N/A')}°C with "
+            f"{historical_weather.get('total_rainfall_mm', 'N/A')}mm rainfall\n\n"
             f"CROP ADVISORY: {crop_advisory.get('advisory_text', 'N/A')}\n\n"
             f"MARKET: {market_data.get('recommendation', 'N/A')} - "
             f"₹{market_data.get('avg_price', 'N/A')}/quintal "

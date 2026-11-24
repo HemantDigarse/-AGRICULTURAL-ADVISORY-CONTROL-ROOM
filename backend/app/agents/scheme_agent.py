@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List
 
 from app.agents import BaseAgent
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class GovernmentSchemeAgent(BaseAgent):
             "relevant_schemes": relevant_schemes,
             "total_found": len(relevant_schemes),
             "matching_context": list(context_words)[:10],
-            "is_demo": True,
+            "is_demo": settings.DEMO_MODE,
         }
 
         await blackboard.update_section(request_id, "scheme_data", scheme_result)

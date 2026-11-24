@@ -29,6 +29,18 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """Registered application user."""
+
+    __tablename__ = "users"
+
+    id = Column(String(36), primary_key=True, default=_new_id)
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    password_hash = Column(String(512), nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 # ── 1. Farmers ──────────────────────────────────────────────────────────────
 class Farmer(Base):
     __tablename__ = "farmers"

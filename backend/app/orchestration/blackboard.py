@@ -128,9 +128,25 @@ class Blackboard:
             state = self._states[request_id]
             state.final_advisory = advisory_data
             state.status = "completed"
-            state.updated_at = datetime.now(timezone.utc)
+            state.completed_at = datetime.now(timezone.utc)
+            state.updated_at = state.completed_at
 
         await self._push_event(request_id, "advisory_complete", advisory_data)
+
+    async def mark_failed(self, request_id: str, reason: str) -> None:
+        """Mark a request as failed and notify any SSE subscribers."""
+        lock = self._locks.get(request_id)
+        if lock is None:
+            raise ValueError(f"No blackboard for request {request_id}")
+
+        async with lock:
+            state = self._states[request_id]
+            state.status = "failed"
+            state.failure_reason = reason
+            state.completed_at = datetime.now(timezone.utc)
+            state.updated_at = state.completed_at
+
+        await self._push_event(request_id, "advisory_failed", {"error": reason})
 
     # ── SSE helpers ──────────────────────────────────────────────────────
     async def _push_event(self, request_id: str, event: str, data: Dict[str, Any]) -> None:

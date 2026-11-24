@@ -58,47 +58,46 @@ class AdvisoryOrchestrator:
             logger.info("[%s] Phase 1: Intake validation", request_id)
             await self.intake._safe_execute(blackboard, request_id)
 
-            # Phase 2: Weather + Market + Scheme in parallel
-            logger.info("[%s] Phase 2: Weather + Market + Scheme (parallel)", request_id)
+            # Phase 2: Weather + Market in parallel
+            logger.info("[%s] Phase 2: Weather + Market (parallel)", request_id)
             phase2_results = await asyncio.gather(
                 self.weather._safe_execute(blackboard, request_id),
                 self.market._safe_execute(blackboard, request_id),
-                self.scheme._safe_execute(blackboard, request_id),
                 return_exceptions=True,
             )
 
             # Log any Phase 2 failures
             for i, result in enumerate(phase2_results):
                 if isinstance(result, Exception):
-                    agent_name = ["weather", "market", "scheme"][i]
+                    agent_name = ["weather", "market"][i]
                     logger.error("[%s] Phase 2 agent %s failed: %s", request_id, agent_name, result)
 
-            # Phase 3: Crop + Risk (after weather data is available)
-            logger.info("[%s] Phase 3: Crop Advisory + Risk Assessment (parallel)", request_id)
+            # Phase 3: Crop, risk, and scheme matching (after weather data is available)
+            logger.info("[%s] Phase 3: Crop Advisory + Risk Assessment + Scheme Matching (parallel)", request_id)
             phase3_results = await asyncio.gather(
                 self.crop._safe_execute(blackboard, request_id),
                 self.risk._safe_execute(blackboard, request_id),
+                self.scheme._safe_execute(blackboard, request_id),
                 return_exceptions=True,
             )
 
             for i, result in enumerate(phase3_results):
                 if isinstance(result, Exception):
-                    agent_name = ["crop", "risk"][i]
+                    agent_name = ["crop", "risk", "scheme"][i]
                     logger.error("[%s] Phase 3 agent %s failed: %s", request_id, agent_name, result)
 
             # Phase 4: Coordinator (after all agents complete)
             logger.info("[%s] Phase 4: Coordinator consolidation", request_id)
-            await self.coordinator._safe_execute(blackboard, request_id)
+            result = await self.coordinator._safe_execute(blackboard, request_id)
+            if "error" in result:
+                await blackboard.mark_failed(request_id, result["error"])
 
         except Exception as exc:
             logger.exception("[%s] Pipeline failed: %s", request_id, exc)
-            # Mark as failed on blackboard
             try:
-                state = await blackboard.get_state(request_id)
-                if state:
-                    state.status = "failed"
+                await blackboard.mark_failed(request_id, str(exc))
             except Exception:
-                pass
+                logger.exception("[%s] Could not record pipeline failure", request_id)
 
         elapsed = round(time.time() - start, 3)
         logger.info("[%s] Pipeline completed in %.3fs", request_id, elapsed)

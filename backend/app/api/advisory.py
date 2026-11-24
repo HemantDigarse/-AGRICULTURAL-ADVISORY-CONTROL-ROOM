@@ -96,7 +96,6 @@ async def _run_pipeline(request_id: str):
         await asyncio.gather(
             weather._safe_execute(blackboard, request_id),
             market._safe_execute(blackboard, request_id),
-            scheme._safe_execute(blackboard, request_id),
             return_exceptions=True,
         )
 
@@ -104,14 +103,18 @@ async def _run_pipeline(request_id: str):
         await asyncio.gather(
             crop._safe_execute(blackboard, request_id),
             risk._safe_execute(blackboard, request_id),
+            scheme._safe_execute(blackboard, request_id),
             return_exceptions=True,
         )
 
         # Phase 4: coordinator
-        await coordinator._safe_execute(blackboard, request_id)
+        result = await coordinator._safe_execute(blackboard, request_id)
+        if "error" in result:
+            await blackboard.mark_failed(request_id, result["error"])
 
     except Exception as exc:
         logger.exception("Pipeline failed for %s: %s", request_id, exc)
+        await blackboard.mark_failed(request_id, str(exc))
 
 
 @router.get("/{request_id}", response_model=AdvisoryStatusResponse)
@@ -135,7 +138,7 @@ async def get_advisory_status(request_id: str):
         },
         growth_stage=farmer_info.get("growth_stage"),
         created_at=state.created_at,
-        completed_at=None,
+        completed_at=state.completed_at,
     )
 
 
@@ -207,8 +210,8 @@ async def stream_advisory(request_id: str):
                     "data": json.dumps(event.get("data", {})),
                 }
 
-                # Stop streaming after advisory is complete
-                if event.get("event") == "advisory_complete":
+                # Stop streaming after the request reaches a terminal state.
+                if event.get("event") in {"advisory_complete", "advisory_failed"}:
                     break
             except asyncio.TimeoutError:
                 # Send keepalive

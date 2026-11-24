@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List
 
 from app.agents import BaseAgent
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class RiskAlertAgent(BaseAgent):
             "alerts": alerts,
             "total_alerts": len(alerts),
             "summary": self._generate_summary(overall, alerts),
-            "is_demo": True,
+            "is_demo": settings.DEMO_MODE,
         }
 
         await blackboard.update_section(request_id, "risk_assessment", risk_result)

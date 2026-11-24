@@ -1,13 +1,30 @@
 """Weather API routes."""
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.orchestration.blackboard import blackboard
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/weather", tags=["weather"])
+
+
+@router.get("/current")
+async def get_current_weather(
+    city: str = Query(..., min_length=2, max_length=100),
+    state: str = Query("", max_length=100),
+):
+    """Fetch current conditions and forecast for a searched location."""
+    from app.services.weather_service import get_weather
+
+    try:
+        return await get_weather(city.strip(), state.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Live weather lookup failed for %s, %s", city, state)
+        raise HTTPException(status_code=502, detail="Live weather is temporarily unavailable.") from exc
 
 
 @router.get("/{request_id}")
