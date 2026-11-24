@@ -44,7 +44,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <Link
-          to="/generate"
+          to="/advisory/new"
           className="inline-flex items-center gap-2 px-4 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800 transition-colors shadow-sm"
         >
           New Advisory <ArrowRight className="w-4 h-4" />

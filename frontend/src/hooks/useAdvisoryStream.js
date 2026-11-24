@@ -19,53 +19,38 @@ export default function useAdvisoryStream(requestId) {
     const es = new EventSource(url);
     eventSourceRef.current = es;
 
-    es.onmessage = (event) => {
+    const updateAgentStatus = (event) => {
       try {
         const data = JSON.parse(event.data);
-
-        if (data.type === 'agent_status') {
-          setAgentStatuses((prev) => ({
-            ...prev,
-            [data.agent_name]: {
-              status: data.status,
-              processing_time: data.processing_time || null,
-              output_preview: data.output_preview || null,
-              timestamp: data.timestamp || new Date().toISOString(),
-            },
-          }));
-        }
-
-        if (data.type === 'complete') {
-          setIsComplete(true);
-          es.close();
-        }
-
-        if (data.type === 'error') {
-          setError(data.message || 'Stream error');
-          es.close();
-        }
-      } catch (e) {
-        // Non-JSON message, ignore
+        if (!data.agent) return;
+        setAgentStatuses((previous) => ({
+          ...previous,
+          [data.agent]: {
+            status: event.type.replace('agent_', ''),
+            error: data.error || null,
+          },
+        }));
+      } catch {
+        setError('Could not read a pipeline update.');
       }
     };
 
-    es.addEventListener('agent_update', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setAgentStatuses((prev) => ({
-          ...prev,
-          [data.agent_name]: {
-            status: data.status,
-            processing_time: data.processing_time || null,
-            output_preview: data.output_preview || null,
-            timestamp: data.timestamp || new Date().toISOString(),
-          },
-        }));
-      } catch (e) {}
+    es.addEventListener('agent_running', updateAgentStatus);
+    es.addEventListener('agent_completed', updateAgentStatus);
+    es.addEventListener('agent_failed', updateAgentStatus);
+
+    es.addEventListener('advisory_complete', () => {
+      setIsComplete(true);
+      es.close();
     });
 
-    es.addEventListener('complete', () => {
-      setIsComplete(true);
+    es.addEventListener('advisory_failed', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setError(data.error || 'The advisory pipeline failed.');
+      } catch {
+        setError('The advisory pipeline failed.');
+      }
       es.close();
     });
 

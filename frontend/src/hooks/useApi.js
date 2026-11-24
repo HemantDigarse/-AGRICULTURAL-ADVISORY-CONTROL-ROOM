@@ -1,33 +1,28 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
-export default function useApi(apiFn, immediate = false) {
+export default function useApi(fetcher, deps = []) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const execute = useCallback(
-    async (...args) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await apiFn(...args);
-        setData(response.data);
-        return response.data;
-      } catch (err) {
-        setError(err.message || 'An error occurred');
-        throw err;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [apiFn]
-  );
+  const execute = useCallback(async (...args) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetcher(...args);
+      setData(res.data);
+      return res.data;
+    } catch (err) {
+      setError(err.message || 'An error occurred');
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, deps);
 
   useEffect(() => {
-    if (immediate) {
-      execute();
-    }
-  }, [immediate, execute]);
+    execute();
+  }, [execute]);
 
-  return { data, loading, error, execute };
+  return { data, loading, error, refetch: execute };
 }

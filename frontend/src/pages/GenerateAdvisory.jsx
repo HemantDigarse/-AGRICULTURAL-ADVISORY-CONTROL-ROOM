@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Send, CheckCircle, Loader2, XCircle } from 'lucide-react';
 import { createAdvisory, getAgentStatuses, getAdvisoryResult } from '../services/api';
@@ -42,7 +42,20 @@ export default function GenerateAdvisory() {
   const [polledAgents, setPolledAgents] = useState({});
   const [done, setDone] = useState(false);
 
-  const { agentStatuses } = useAdvisoryStream(requestId);
+  const { agentStatuses, isComplete, error: streamError } = useAdvisoryStream(requestId);
+  const pollingTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (isComplete) setDone(true);
+  }, [isComplete]);
+
+  useEffect(() => {
+    if (streamError) setError(streamError);
+  }, [streamError]);
 
   const handleChange = (e) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -55,6 +68,7 @@ export default function GenerateAdvisory() {
     setRequestId(null);
     setPolledAgents({});
     setDone(false);
+    if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
 
     try {
       const payload = {
@@ -84,15 +98,20 @@ export default function GenerateAdvisory() {
           // Check if coordinator is done
           if (agents.coordinator?.status === 'completed') {
             clearInterval(poll);
+            pollingTimerRef.current = null;
             setDone(true);
           }
         } catch (err) {
           // Ignore polling errors
         }
       }, 1500);
+      pollingTimerRef.current = poll;
 
       // Safety timeout
-      setTimeout(() => clearInterval(poll), 120000);
+      setTimeout(() => {
+        clearInterval(poll);
+        if (pollingTimerRef.current === poll) pollingTimerRef.current = null;
+      }, 120000);
     } catch (err) {
       setError(err.message);
     } finally {
